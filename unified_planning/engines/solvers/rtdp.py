@@ -2,10 +2,6 @@ import unified_planning as up
 import math
 import time
 import random
-from collections import defaultdict
-
-random.seed(10)
-
 
 class RTDP:
     def __init__(self, mdp, split_mdp, root_state: "up.engines.state.State", search_depth: int):
@@ -47,7 +43,7 @@ class RTDP:
         state = self.root_state
         terminal = False
         depth = 0
-        while state.current_time < self.mdp.deadline() and (not terminal) and (depth < self.search_depth):
+        while state.current_time < self.mdp.deadline() and (not terminal) and (depth < self.search_depth): 
             best_action, best_action_value = self.evaluate(state, timeout, start_time)
 
             terminal, state, reward = self.mdp.step(state, best_action)
@@ -140,7 +136,7 @@ def plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: int, search_
 
         history.append(action)
 
-        if terminal:
+        if terminal and root_state.current_time <= mdp.deadline():
             print(f"Current state is {root_state}")
             return 1, root_state.current_time
 

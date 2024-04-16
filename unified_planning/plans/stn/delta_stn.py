@@ -18,6 +18,8 @@ from collections import deque
 from dataclasses import dataclass
 from numbers import Real
 from typing import Deque, Dict, List, Optional, Any, Generic, Set, Tuple, TypeVar, cast
+import networkx as nx
+import unified_planning
 
 
 T = TypeVar("T", bound=Real)
@@ -138,6 +140,9 @@ class DeltaSimpleTemporalNetwork(Generic[T]):
         return cast(T, -1 * self._distances[x])
 
     def _is_subsumed(self, x: Any, y: Any, b: T) -> bool:
+        """
+        Check if there is a harder constraint from x to y
+        """
         neighbor = self._constraints.get(x, None)
         while neighbor is not None:
             if neighbor.dst == y:
@@ -219,3 +224,80 @@ class DeltaSimpleTemporalNetwork(Generic[T]):
                     constraints[x].append((neighbor.bound, neighbor.dst))
                 neighbor = neighbor.next
         return constraints
+
+    def remove_endPlan_constraint(self, x: Any, end_plan):
+        neighbor = self._constraints[x]
+        new_constraints: DeltaNeighbors = None
+        while neighbor is not None:
+            if neighbor.dst != end_plan:
+                new_constraints = DeltaNeighbors(neighbor.dst, neighbor.bound, new_constraints)
+            neighbor = neighbor.next
+        self._constraints[x] = new_constraints
+
+
+
+    def calculate_shortest_path(self, start_node, target_node):
+        """
+        Calculate the shortest path between start_node and target_node using bellman Ford algorithm
+
+        :param start_node: starts the path from start_node
+        :param target_node: ends the path at target_node
+
+        :return: shortest path between start_node and target_node
+
+
+        Multiple occurrences of the same action can appear
+        (the node represent each action execution points to different memory point) in the STN.
+
+        To ensure that nodes with same logical meaning but different objects in the memory are treated as different vertex
+        unique identifiers are used for each node using the id() except Start_Plan and End_Plan nodes.
+
+        """
+        G = nx.DiGraph()
+
+        # Maintain a mapping between node identifiers and actual node objects
+        node_map = {}
+
+        # Add edges to the graph
+        for x, neighbor in self._constraints.items():
+            while neighbor is not None:
+
+                # use the node when it is end or start plan node
+                if x.kind.name == 'GLOBAL_END' or x.kind.name == 'GLOBAL_START':
+                    dest_id = x
+                else:
+                    # Generate unique identifiers for the nodes
+                    dest_id = id(x)
+                    # Add the nodes to the graph if not already added
+                    if dest_id not in node_map:
+                        node_map[dest_id] = x
+                        G.add_node(dest_id)
+
+                # use the node when it is end or start plan node
+                if neighbor.dst.kind.name == 'GLOBAL_END' or neighbor.dst.kind.name == 'GLOBAL_START':
+                    src_id = neighbor.dst
+                else:
+                    # Generate unique identifiers for the nodes
+                    src_id = id(neighbor.dst)
+                    # Add the nodes to the graph if not already added
+                    if src_id not in node_map:
+                        node_map[src_id] = neighbor.dst
+                        G.add_node(src_id)
+
+
+                # Add the edge to the graph
+                G.add_edge(src_id, dest_id, weight=neighbor.bound)
+                neighbor = neighbor.next
+
+        # Use the identifiers for start and target nodes
+        if start_node.kind.name == 'GLOBAL_END' or start_node.kind.name == 'GLOBAL_START':
+            start_id = start_node
+        else:
+            start_id = id(start_node)
+
+        if target_node.kind.name == 'GLOBAL_END' or target_node.kind.name == 'GLOBAL_START':
+            target_id = target_node
+        else:
+            target_id = id(target_node)
+
+        return nx.bellman_ford_path_length(G, source=start_id, target=target_id, weight='weight')

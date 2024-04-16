@@ -1,6 +1,6 @@
 import unified_planning
 from unified_planning.shortcuts import *
-
+from unified_planning.domains import Domain
 
 mutex_problem = unified_planning.model.Problem('mutex_problem')
 
@@ -131,14 +131,51 @@ instant = unified_planning.model.InstantaneousAction('instant')
 instant.add_effect(effect_instant, True)
 combination_problem.add_action(instant)
 
-
+domain = Domain('combination', 'combination')
+domain.problem = combination_problem
 grounder = unified_planning.engines.compilers.Grounder()
 combination_grounding_result = grounder._compile(combination_problem)
 combination_ground_problem = combination_grounding_result.problem
 
-combination_convert_problem = unified_planning.engines.Convert_problem_combination(combination_ground_problem)
+combination_convert_problem = unified_planning.engines.Convert_problem_combination(domain,combination_ground_problem)
 
 combination_converted_problem = combination_convert_problem._converted_problem
 
 
 
+LS_problem = unified_planning.model.Problem('long_short_actions')
+
+shortF = unified_planning.model.Fluent('shortF', BoolType())
+longF = unified_planning.model.Fluent('longF', BoolType())
+LS_problem.add_fluent(shortF)
+LS_problem.add_fluent(longF)
+LS_problem.set_initial_value(shortF, False)
+LS_problem.set_initial_value(longF, False)
+
+""" Actions """
+
+""" short Action """
+short = unified_planning.model.DurativeAction('short')
+short.add_effect(shortF, True)
+short.set_fixed_duration(3)
+LS_problem.add_action(short)
+
+
+""" long Action """
+long = unified_planning.model.DurativeAction('long')
+long.add_effect(longF, True)
+long.set_fixed_duration(6)
+LS_problem.add_action(long)
+
+LS_problem.add_goal(shortF)
+LS_problem.add_goal(longF)
+deadline_timing = Timing(delay=20, timepoint=Timepoint(TimepointKind.START))
+LS_problem.set_deadline(deadline_timing)
+
+grounder = unified_planning.engines.compilers.Grounder()
+LS_grounding_result = grounder._compile(LS_problem)
+LS_ground_problem = LS_grounding_result.problem
+
+LS_convert_problem = unified_planning.engines.Convert_problem(OAP_ground_problem)
+
+LS_converted_problem = LS_convert_problem._converted_problem

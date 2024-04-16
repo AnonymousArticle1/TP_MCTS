@@ -57,7 +57,9 @@ class MDP:
                continue
             if action.pos_preconditions.issubset(state.predicates) and \
                     action.neg_preconditions.isdisjoint(state.predicates):
-                legal_actions.append(action)
+                if self.check_action_relevant(state, action):
+                    # prone action that don't add new effects
+                    legal_actions.append(action)
 
         return legal_actions
 
@@ -80,27 +82,31 @@ class MDP:
         next_state = up.engines.State(new_preds)
 
         terminal = self.is_terminal(next_state)
-        relevant_reward = self.check_action_relevant(state, action)
-
-        # common = len(self.problem.goals.intersection(state.predicates))
-        # reward = 100 if terminal else 2 ** (common - len(self.problem.goals))
-
-        reward = 10 if terminal else relevant_reward
+        relevant_reward = 0
+        reward = 1 if terminal else relevant_reward
 
         return terminal, next_state, reward
 
     def check_action_relevant(self, state: "up.engines.State", action):
         if not isinstance(action, up.engines.InstantaneousStartAction):
-            return -1
+            return True #-1
 
-        not_relevant = action.end_action.add_effects.issubset(state.predicates)
+        add = action.add_effects.copy()
+        # Remove inExecution - this is not considered new effect
+        for add_effect in add.copy():
+            if add_effect._content.payload == self.problem.fluent_by_name('inExecution'):
+                add.remove(add_effect)
+
+        not_relevant = add.issubset(state.predicates)
+        # not_relevant &= action.del_effects.isdisjoint(state.predicates)
+        not_relevant &= action.end_action.add_effects.issubset(state.predicates)
         not_relevant &= action.end_action.del_effects.isdisjoint(state.predicates)
         for pe in action.end_action.probabilistic_effects:
             not_relevant = not_relevant & set(pe.fluents).issubset(state.predicates)
 
         if not_relevant:
-            return -50
-        return -1
+            return False #-50
+        return True #-1
 
     def probabilistic_effects(self, prob_outcomes, index):
         """ Gets the add and delete effect of the prob_outcome index effect"""
@@ -216,7 +222,9 @@ class combinationMDP(MDP):
 
         # common = len(self.problem.goals.intersection(state.predicates))
         # reward = 100 if terminal else 2 ** (common - len(self.problem.goals))
-        reward = 10 if terminal else -1
+
+        # reward = 10 if terminal else -1
+        reward = 1 if terminal else 0
 
         return terminal, next_state, reward
 

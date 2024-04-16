@@ -1,5 +1,5 @@
 import numpy as np
-
+from unified_planning.shortcuts import *
 import unified_planning as up
 import math
 import time
@@ -8,8 +8,7 @@ from unified_planning.engines.utils import (
     create_init_stn,
     update_stn,
 )
-
-random.seed(10)
+from unified_planning.engines.linked_list import LinkedListNode
 
 
 class Base_MCTS:
@@ -96,7 +95,7 @@ class Base_MCTS:
         start_time = time.time()
         current_time = time.time()
         i = 0
-        selection = self.selection if selection_type == 'avg' else self.selection_max
+        selection = self.selection if selection_type == 'avg' else (self.selection_root_interval if selection_type == 'rootInterval' else self.selection_max)
         while current_time < start_time + timeout:
             selection(self.root_node)
             current_time = time.time()
@@ -108,6 +107,11 @@ class Base_MCTS:
         raise NotImplementedError
 
     def selection_max(self, snode: "up.engines.Snode"):
+        raise NotImplementedError
+
+    def selection_root_interval(self, snode: "up.engines.Snode"):
+        raise NotImplementedError
+    def selection_root_interval_max(self, snode: "up.engines.Snode"):
         raise NotImplementedError
 
     def simulate(self, state, depth):
@@ -123,8 +127,6 @@ class MCTS(Base_MCTS):
         create_snode = self.create_Snode_max if selection_type == 'max' else self.create_Snode
         snode, _ = create_snode(root_state, 0)
         self.set_root_node(root_node if root_node is not None else snode)
-        # self.set_root_node(root_node if root_node is not None else self.create_Snode(root_state, 0))
-
 
     def create_Snode(self, state: "up.engines.State", depth: int,
                      parent: "up.engines.ANode" = None):
@@ -132,7 +134,7 @@ class MCTS(Base_MCTS):
         return up.engines.SNode(state, depth, self.mdp.legal_actions(state), parent), None
 
     def create_Snode_max(self, state: "up.engines.State", depth: int,
-                     parent: "up.engines.C_ANode" = None):
+                         parent: "up.engines.C_ANode" = None):
         """ Create a new Snode for the state `state` with parent `parent`"""
         snode = up.engines.SNode(state, depth, self.mdp.legal_actions(state), parent)
         best = -math.inf
@@ -224,7 +226,6 @@ class MCTS(Base_MCTS):
         cumulative_reward = 0.0
         terminal = False
         deadline = self.mdp.deadline()
-        # while not terminal and len(self.mdp.legal_actions(state)) > 0:
         while not terminal and depth < self.search_depth and len(self.mdp.legal_actions(state)) > 0:
             # Choose an action to execute
             action = self.default_policy(state)
@@ -248,12 +249,10 @@ class C_MCTS(Base_MCTS):
         super().__init__(mdp, search_depth, exploration_constant, k)
         self._previous_chosen_action_node = previous_chosen_action_node
 
-        create_snode = self.create_Snode_max if selection_type == 'max' else self.create_Snode
+        create_snode = self.create_Snode_max if selection_type == 'max' else (self.create_Snode_root_interval if selection_type == 'rootInterval' else self.create_Snode)
         snode, _ = create_snode(root_state, 0, stn,
-                         previous_chosen_action_node=previous_chosen_action_node)
+                                previous_chosen_action_node=previous_chosen_action_node)
         self.set_root_node(root_node if root_node is not None else snode)
-        # self.set_root_node(root_node if root_node is not None else self.create_Snode(root_state, 0, stn,
-        #                                                                              previous_chosen_action_node=previous_chosen_action_node))
         self._stn = stn
 
     @property
@@ -266,16 +265,24 @@ class C_MCTS(Base_MCTS):
 
     def create_Snode(self, state: "up.engines.State", depth: int, stn: "up.plans.stn.STNPlan",
                      parent: "up.engines.C_ANode" = None,
-                     previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None):
+                     previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None, isInterval=False):
         """ Create a new Snode for the state `state` with parent `parent`"""
-        return up.engines.C_SNode(state, depth, self.mdp.legal_actions(state), stn, parent, previous_chosen_action_node), None
+        return up.engines.C_SNode(state, depth, self.mdp.legal_actions(state), stn, parent,
+                                  previous_chosen_action_node, isInterval), None
 
+    def create_Snode_root_interval(self, state: "up.engines.State", depth: int, stn: "up.plans.stn.STNPlan",
+                     parent: "up.engines.C_ANode" = None,
+                     previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None, isInterval=True):
+        """ Create a new Snode for the state `state` with parent `parent`"""
+        return up.engines.C_SNode(state, depth, self.mdp.legal_actions(state), stn, parent,
+                                  previous_chosen_action_node, isInterval), None
 
     def create_Snode_max(self, state: "up.engines.State", depth: int, stn: "up.plans.stn.STNPlan",
-                     parent: "up.engines.C_ANode" = None,
-                     previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None):
+                         parent: "up.engines.C_ANode" = None,
+                         previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None):
         """ Create a new Snode for the state `state` with parent `parent`"""
-        snode = up.engines.C_SNode(state, depth, self.mdp.legal_actions(state), stn, parent, previous_chosen_action_node)
+        snode = up.engines.C_SNode(state, depth, self.mdp.legal_actions(state), stn, parent,
+                                   previous_chosen_action_node)
         best = -math.inf
 
         actions_idx = list(range(len(snode.children)))
@@ -285,7 +292,7 @@ class C_MCTS(Base_MCTS):
         for action_idx in actions_idx:
             action = list(snode.children.keys())[action_idx]
             terminal, next_state, reward = self.mdp.step(snode.state, action)
-            reward += self.mdp.discount_factor * self.heuristic_init(next_state,  snode.children[action].stn)
+            reward += self.mdp.discount_factor * self.heuristic_init(next_state, snode.children[action].stn)
             snode.children[action].update(reward)
             if reward > best:
                 best = reward
@@ -295,6 +302,33 @@ class C_MCTS(Base_MCTS):
         snode.update(best)
         return snode, best
 
+
+    def create_Snode_root_interval_max(self, state: "up.engines.State", depth: int, stn: "up.plans.stn.STNPlan",
+                                       parent: "up.engines.C_ANode" = None,
+                                       previous_chosen_action_node: "up.plans.stn.STNPlanNode" = None, root_STNnode = None):
+        """ Create a new Snode for the state `state` with parent `parent`"""
+        snode = up.engines.C_SNode(state, depth, self.mdp.legal_actions(state), stn, parent,
+                                   previous_chosen_action_node, isInterval=True)
+        best = -math.inf
+
+        actions_idx = list(range(len(snode.children)))
+        if self.k < len(snode.children):
+            actions_idx = random.sample(range(0, len(snode.children)), self.k)
+
+        for action_idx in actions_idx:
+            action = list(snode.children.keys())[action_idx]
+            terminal, next_state, reward = self.mdp.step(snode.state, action)
+            reward += self.mdp.discount_factor * self.heuristic_init(next_state, snode.children[action].stn)
+            if reward > best:
+                best = reward
+        if best == -math.inf:
+            best = self.heuristic(snode)
+
+        backup_node = None
+        if root_STNnode is not None:
+            backup_node = LinkedListNode(*snode.parent.stn.get_legal_interval(root_STNnode), best)
+            snode.update(None, backup_node)
+        return snode, backup_node
 
     def selection(self, snode: "up.engines.C_Snode"):
         if len(snode.possible_actions) == 0:
@@ -352,58 +386,106 @@ class C_MCTS(Base_MCTS):
                 reward += snode_reward
                 anode.add_child(next_snode)
 
-                # next_snode.update(reward)
-
         anode.update(reward)
         max_v = snode.max_update()
 
         return max_v
 
+    def selection_root_interval(self, snode: "up.engines.C_Snode", root_STNnode: "up.plans.stn.STNPlanNode" = None):
+        if len(snode.possible_actions) == 0:
+            # Stop when there are no possible actions to take so the plan remains consistent
+            if root_STNnode is None:
+                return 0
+            return 0, *snode.parent.stn.get_legal_interval(root_STNnode)
+
+        if snode.depth > self.search_depth:
+            # Stop if the search depth is reached
+            return self.heuristic(snode), *snode.parent.stn.get_legal_interval(root_STNnode)
+
+        explore_constant = self.exploration_constant
+        # Choose a consistent action
+        action = self.uct(snode, explore_constant)
+        terminal, next_state, reward = self.mdp.step(snode.state, action)
+
+        anode = snode.children[action]
+        if root_STNnode is None:
+            root_STNnode = anode.STNNode
+
+        if not terminal:
+            snodes = anode.children
+            if next_state in snodes:
+                next_reward, lower, upper = self.selection_root_interval(snodes[next_state], root_STNnode)
+                reward += next_reward * self.mdp.discount_factor
+
+            else:
+                next_snode, _ = self.create_Snode_root_interval(next_state, snode.depth + 1, anode.stn, anode)
+                lower, upper = anode.stn.get_legal_interval(root_STNnode)
+                reward += self.heuristic(next_snode) * self.mdp.discount_factor
+                anode.add_child(next_snode)
+                next_snode.update(reward, lower, upper)
+
+        else:
+            # when the state is terminal set the lower and upper according to anode root
+            lower, upper = anode.stn.get_legal_interval(root_STNnode)
+
+        anode.update(reward, lower, upper)
+        snode.update(reward, lower, upper)
+        return reward, lower, upper
+
+
+    def selection_root_interval_max(self, snode: "up.engines.C_Snode", root_STNnode: "up.plans.stn.STNPlanNode" = None):
+        if len(snode.possible_actions) == 0:
+            if root_STNnode is None:
+                return -100
+            # Stop when there are no possible actions to take so the plan remains consistent
+            return LinkedListNode(*snode.parent.stn.get_legal_interval(root_STNnode), - 100)
+
+        if snode.depth > self.search_depth:
+            # Stop if the search depth is reached
+            return LinkedListNode(*snode.parent.stn.get_legal_interval(root_STNnode), self.heuristic(snode))
+        explore_constant = self.exploration_constant
+        # Choose a consistent action
+        action = self.uct(snode, explore_constant)
+        terminal, next_state, reward = self.mdp.step(snode.state, action)
+        anode = snode.children[action]
+        if root_STNnode is None:
+            root_STNnode = anode.STNNode
+
+        if not terminal:
+            snodes = anode.children
+            if next_state in snodes:
+                backup_node = self.selection_root_interval_max(snodes[next_state], root_STNnode)
+                backup_node.update_df_reward(self.mdp.discount_factor, reward)
+
+            else:
+                next_snode, backup_node = self.create_Snode_root_interval_max(next_state, snode.depth + 1, anode.stn, anode, root_STNnode=root_STNnode)
+                backup_node.update_df_reward(self.mdp.discount_factor, reward)
+                anode.add_child(next_snode)
+
+        else:
+            backup_node = LinkedListNode(*anode.stn.get_legal_interval(root_STNnode), reward)
+
+        anode.update(None, backup_node)
+        backup_node = snode.max_update(backup_node)
+        return backup_node
+
     def heuristic(self, snode: "up.engines.C_SNode"):
         current_time = 0
+        lower_bounds = None
         if snode.parent:
             current_time = snode.parent.stn.get_current_end_time()
+            lower_bounds = snode.parent.stn.get_lower_bound_potential_end_action()
         h = up.engines.heuristics.TRPG(self.mdp, snode.state, current_time)
-        return h.get_heuristic()
+        return h.get_heuristic(lower_bounds)
 
     def heuristic_init(self, state, stn):
         current_time = stn.get_current_end_time()
         h = up.engines.heuristics.TRPG(self.mdp, state, current_time)
         return h.get_heuristic()
 
-    def simulate(self, state, depth):
-        """ Simulate until a terminal state """
-        cumulative_reward = 0.0
-        terminal = False
-        deadline = self.mdp.deadline()
-        time = self.stn.get_current_end_time()
-        end = -1
-        # while not terminal and len(self.mdp.legal_actions(state)) > 0:
-        while not terminal and depth < self.search_depth and len(self.mdp.legal_actions(state)) > 0:
-            if deadline:
-                if time > deadline:
-                    break
-            # Choose an action to execute
-            action = self.default_policy(state)
-            if isinstance(action, up.engines.action.InstantaneousStartAction) and end == -1:
-                time += action.duration.lower.constant_value()
-                end = action.end_action
 
-            if action == end:
-                end = -1
-            # Execute the action
-            (terminal, next_state, reward) = self.mdp.step(state, action)
-
-            # Discount the reward
-            cumulative_reward += pow(self.mdp.discount_factor, depth) * reward
-            depth += 1
-
-            state = next_state
-
-        return cumulative_reward
-
-
-def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int, exploration_constant: float, selection_type='avg', k=10):
+def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int, exploration_constant: float,
+         selection_type='avg', k=10):
     stn = create_init_stn(mdp)
     root_state = mdp.initial_state()
 
@@ -415,7 +497,8 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
 
     while stn.get_current_end_time() <= mdp.deadline():
         print(f"started step {step}")
-        mcts = C_MCTS(mdp, root_node, root_state, search_depth, exploration_constant, stn, selection_type, k, previous_action_node)
+        mcts = C_MCTS(mdp, root_node, root_state, search_depth, exploration_constant, stn, selection_type, k,
+                      previous_action_node)
         action = mcts.search(search_time, selection_type)
 
         if action == -1:
@@ -432,8 +515,11 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
             root_node.set_depth(0)
 
         # update STN to include the action
-        previous_action_node = update_stn(stn, action, previous_action_node, type='SetTime')
-        assert stn.is_consistent
+        action_node = mcts.root_node.children[action] if selection_type == 'rootInterval' else None
+
+        previous_action_node = update_stn(stn, action, previous_action_node, type='SetTime', action_node=action_node)
+
+        assert stn.is_consistent()
 
         print(f"The time of the plan so far: {stn.get_current_end_time()}")
         history.append(previous_action_node)
@@ -449,7 +535,8 @@ def plan(mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int,
     return 0, -math.inf
 
 
-def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: int, search_time: int, search_depth: int, exploration_constant: float,
+def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: int, search_time: int,
+                     search_depth: int, exploration_constant: float,
                      selection_type='avg', k=10):
     root_state = mdp.initial_state()
     history = []
@@ -470,7 +557,7 @@ def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: 
         history.append(action)
         print(f'current time = {root_state.current_time}')
 
-        if terminal and root_state.current_time < mdp.deadline():
+        if terminal and root_state.current_time <= mdp.deadline():
             print(f"Current state is {root_state}")
             print(f"The amount of time the plan took: {root_state.current_time}")
             return 1, root_state.current_time
@@ -478,8 +565,3 @@ def combination_plan(mdp: "up.engines.MDP", split_mdp: "up.engines.MDP", steps: 
         step += 1
 
     return 0, -math.inf
-
-
-
-
-
